@@ -245,6 +245,24 @@ resetBtn.addEventListener('click', () => {
   refreshSlots();
 });
 
+const PT_MONTH_NAMES = {
+  'janeiro':'January','fevereiro':'February','marco':'March','março':'March','abril':'April',
+  'maio':'May','junho':'June','julho':'July','agosto':'August','setembro':'September',
+  'outubro':'October','novembro':'November','dezembro':'December'
+};
+
+function englishMonth(monthStr){
+  if (!monthStr) return monthStr;
+  const norm = monthStr.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const yearMatch = monthStr.match(/\d{4}/);
+  const year = yearMatch ? yearMatch[0] : '';
+  for (const pt of Object.keys(PT_MONTH_NAMES)){
+    const ptNorm = pt.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    if (norm.includes(ptNorm)) return year ? `${PT_MONTH_NAMES[pt]} ${year}` : PT_MONTH_NAMES[pt];
+  }
+  return monthStr; // already in English (or unrecognized), leave as-is
+}
+
 function ageLabel(raw){
   const t = raw.trim();
   if (!t) return '(unknown)';
@@ -308,7 +326,7 @@ function buildWorkbook(){
   // ================= Summary =================
   const summaryAoa = [
     ['Ad Inventory - Audience Metrics'],
-    [`Reference month: ${mauMonth || '(not identified)'}`],
+    [`Reference month: ${mauMonth ? englishMonth(mauMonth) : '(not identified)'}`],
     [],
     ['MAU (Monthly Active Users)', mauUsers],
     [],
@@ -357,22 +375,7 @@ function buildWorkbook(){
 
   wb.SheetNames = ['Summary', 'Country %', 'Age %'];
 
-  const PT_MONTHS = {
-    'janeiro':'january','fevereiro':'february','marco':'march','março':'march','abril':'april',
-    'maio':'may','junho':'june','julho':'july','agosto':'august','setembro':'september',
-    'outubro':'october','novembro':'november','dezembro':'december'
-  };
-  function monthSlugFrom(monthStr){
-    if (!monthStr) return 'no-month';
-    let s = monthStr.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    Object.keys(PT_MONTHS).forEach(pt => {
-      const ptNorm = pt.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-      if (s.includes(ptNorm)) s = s.replace(ptNorm, PT_MONTHS[pt]);
-    });
-    s = s.replace(/\bde\b/g, ' ');
-    return s.replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
-  }
-  const monthSlug = monthSlugFrom(mauMonth);
+  const monthSlug = englishMonth(mauMonth || '').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'no-month';
   XLSX.writeFile(wb, `ad_inventory_metrics_${monthSlug}.xlsx`);
   log(`Excel generated: ad_inventory_metrics_${monthSlug}.xlsx (Summary, Country %, Age % — ${countryDataRows.length} countries, ${ageDataRows.length} age brackets)`, 'good');
 }
@@ -389,3 +392,4 @@ genBtn.addEventListener('click', () => {
 </script>
 </body>
 </html>
+
