@@ -292,16 +292,30 @@ function buildWorkbook(){
     count: findKey(state.ca.rows[0], 'user count')
   };
 
-  // ---- Country totals (one row per country already in the source file) ----
-  const countryRows = state.country.rows
-    .map(r => ({ country: (r[countryKey.country] || '').trim() || '(Unknown)', count: Number(r[countryKey.count]) || 0 }))
-    .filter(r => r.count > 0);
-  countryRows.sort((a, b) => b.count - a.count);
+  // ---- Country totals: consolidate by country (handles files with one row
+  // per country per month by summing them into a single line per country) ----
+  const countryMap = new Map();
+  state.country.rows.forEach(r => {
+    const name = (r[countryKey.country] || '').trim() || '(Unknown)';
+    const count = Number(r[countryKey.count]) || 0;
+    countryMap.set(name, (countryMap.get(name) || 0) + count);
+  });
+  const countryRows = [...countryMap.entries()]
+    .map(([country, count]) => ({ country, count }))
+    .filter(r => r.count > 0)
+    .sort((a, b) => b.count - a.count);
   const countryTotal = countryRows.reduce((sum, r) => sum + r.count, 0);
 
-  // ---- MAU ----
-  const mauMonth = (mauRow0[mauKey.month] || '').trim();
-  const mauUsers = Number(mauRow0[mauKey.users]) || 0;
+  // ---- MAU: one row per month. Never sum unique-user counts across months
+  // (that would double-count returning users) — show each month on its own. ----
+  const mauEntries = state.mau.rows.map(r => ({
+    month: (r[mauKey.month] || '').trim(),
+    users: Number(r[mauKey.users]) || 0
+  })).filter(r => r.month);
+  const isMultiMonth = mauEntries.length > 1;
+  const periodLabel = isMultiMonth
+    ? `${englishMonth(mauEntries[0].month)} – ${englishMonth(mauEntries[mauEntries.length - 1].month)}`
+    : englishMonth(mauEntries[0] ? mauEntries[0].month : '');
 
   // ---- Age aggregation across the Country x Age file ----
   const caRows = state.ca.rows.map(r => ({
@@ -324,18 +338,32 @@ function buildWorkbook(){
   const wb = XLSX.utils.book_new();
 
   // ================= Summary =================
-  const summaryAoa = [
-    ['Ad Inventory - Audience Metrics'],
-    [`Reference month: ${mauMonth ? englishMonth(mauMonth) : '(not identified)'}`],
-    [],
-    ['MAU (Monthly Active Users)', mauUsers],
-    [],
-    ['Total Ad Requests (all countries)', countryTotal],
-  ];
+  const summaryAoa = [];
+  summaryAoa.push(['Ad Inventory - Audience Metrics']);
+  summaryAoa.push([`Period: ${periodLabel || '(not identified)'}`]);
+  summaryAoa.push([]);
+  const numberCells = []; // { addr, value } to format as #,##0 after sheet is built
+
+  function pushRow(row){ summaryAoa.push(row); return summaryAoa.length; } // returns 1-based row number just added
+
+  if (!isMultiMonth){
+    const r = pushRow(['MAU (Monthly Active Users)', mauEntries[0] ? mauEntries[0].users : 0]);
+    numberCells.push(`B${r}`);
+  } else {
+    pushRow(['MAU by month (not summed — unique users can repeat across months)']);
+    pushRow(['Month', 'Unique Users']);
+    mauEntries.forEach(e => {
+      const r = pushRow([englishMonth(e.month), e.users]);
+      numberCells.push(`B${r}`);
+    });
+  }
+  pushRow([]);
+  const totalR = pushRow(['Total Ad Requests (all countries, full period)', countryTotal]);
+  numberCells.push(`B${totalR}`);
+
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryAoa);
-  wsSummary['B4'].z = '#,##0';
-  wsSummary['B6'].z = '#,##0';
-  setColWidths(wsSummary, [32, 16]);
+  numberCells.forEach(addr => { if (wsSummary[addr]) wsSummary[addr].z = '#,##0'; });
+  setColWidths(wsSummary, [45, 16]);
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
 
   // ================= Country % =================
@@ -375,7 +403,10 @@ function buildWorkbook(){
 
   wb.SheetNames = ['Summary', 'Country %', 'Age %'];
 
-  const monthSlug = englishMonth(mauMonth || '').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'no-month';
+  const slugOf = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+  const monthSlug = isMultiMonth
+    ? `${slugOf(englishMonth(mauEntries[0].month))}_to_${slugOf(englishMonth(mauEntries[mauEntries.length - 1].month))}`
+    : (mauEntries[0] ? slugOf(englishMonth(mauEntries[0].month)) : 'no-month');
   XLSX.writeFile(wb, `ad_inventory_metrics_${monthSlug}.xlsx`);
   log(`Excel generated: ad_inventory_metrics_${monthSlug}.xlsx (Summary, Country %, Age % — ${countryDataRows.length} countries, ${ageDataRows.length} age brackets)`, 'good');
 }
