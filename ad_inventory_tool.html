@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ad Inventory → Excel</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115;
+    --panel:#171a21;
+    --panel-2:#1e222b;
+    --border:#2a2f3a;
+    --text:#e7e9ee;
+    --muted:#8b93a3;
+    --accent:#4fd1a5;
+    --accent-dim:#2f7d63;
+    --warn:#e8b34a;
+    --danger:#e8615a;
+    --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    padding:48px 20px;
+  }
+  .wrap{width:100%;max-width:760px;}
+  header{margin-bottom:32px;}
+  h1{font-size:22px;margin:0 0 6px;letter-spacing:-0.01em;}
+  header p{color:var(--muted);margin:0;font-size:14px;line-height:1.5;}
+  .slots{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:12px;
+    margin-bottom:20px;
+  }
+  .slot{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 18px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+  }
+  .slot .dot{
+    width:10px;height:10px;border-radius:50%;
+    background:var(--border);
+    flex:none;
+  }
+  .slot.ok .dot{background:var(--accent);}
+  .slot .info{flex:1;min-width:0;}
+  .slot .label{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .slot .detail{font-size:14px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .slot.ok .detail{color:var(--text);}
+  .slot:not(.ok) .detail{color:var(--muted);}
+
+  .dropzone{
+    border:1.5px dashed var(--border);
+    border-radius:12px;
+    padding:32px 20px;
+    text-align:center;
+    color:var(--muted);
+    cursor:pointer;
+    transition:.15s border-color, .15s background;
+    margin-bottom:24px;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--accent-dim);
+    background:rgba(79,209,165,.05);
+  }
+  .dropzone strong{color:var(--text);}
+  input[type=file]{display:none;}
+
+  button#generate{
+    width:100%;
+    padding:14px;
+    border:none;
+    border-radius:10px;
+    background:var(--accent-dim);
+    color:#eafff6;
+    font-size:15px;
+    font-weight:600;
+    cursor:not-allowed;
+    opacity:.5;
+    transition:.15s opacity, .15s background;
+  }
+  button#generate.ready{
+    cursor:pointer;
+    opacity:1;
+    background:var(--accent);
+    color:#04231a;
+  }
+  button#generate.ready:hover{background:#63e0b7;}
+
+  .log{
+    margin-top:18px;
+    font-family:var(--mono);
+    font-size:12.5px;
+    color:var(--muted);
+    white-space:pre-wrap;
+    line-height:1.6;
+  }
+  .log .err{color:var(--danger);}
+  .log .warn{color:var(--warn);}
+  .log .good{color:var(--accent);}
+
+  footer{margin-top:36px;color:var(--muted);font-size:12px;line-height:1.6;border-top:1px solid var(--border);padding-top:16px;}
+  footer b{color:var(--text);}
+  .reset{
+    background:none;border:none;color:var(--muted);text-decoration:underline;
+    cursor:pointer;font-size:12.5px;padding:0;margin-top:12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ad Inventory → Excel</h1>
+    <p>Drop the 3 exports (Country, MAU, Country×Age) below. It auto-detects which file is which — order doesn't matter. Everything runs in the browser, no data leaves your machine.</p>
+  </header>
+
+  <div class="slots">
+    <div class="slot" id="slot-country"><span class="dot"></span><div class="info"><div class="label">Country (Ad Requests)</div><div class="detail">waiting for file…</div></div></div>
+    <div class="slot" id="slot-mau"><span class="dot"></span><div class="info"><div class="label">MAU</div><div class="detail">waiting for file…</div></div></div>
+    <div class="slot" id="slot-ca"><span class="dot"></span><div class="info"><div class="label">Country × Age</div><div class="detail">waiting for file…</div></div></div>
+  </div>
+
+  <div class="dropzone" id="dropzone">
+    <div><strong>Drag CSVs here</strong> or click to choose</div>
+    <div style="font-size:12px;margin-top:6px;">you can drop all 3 at once</div>
+  </div>
+  <input type="file" id="fileInput" accept=".csv" multiple>
+
+  <button id="generate" disabled>Generate Excel</button>
+  <button class="reset" id="resetBtn" style="display:none;">Clear and start over</button>
+
+  <div class="log" id="log"></div>
+
+  <footer>
+    <b>Expected format for each file</b> (headers, in whatever order the export gives them):<br>
+    · Country → <code>Country, Ad Request Count, Percent</code><br>
+    · MAU → <code>Month, Unique Users</code><br>
+    · Country×Age → <code>Day str, Country, Age, User count</code>
+  </footer>
+</div>
+
+<script>
+const state = { country: null, mau: null, ca: null };
+const slotEls = { country: document.getElementById('slot-country'), mau: document.getElementById('slot-mau'), ca: document.getElementById('slot-ca') };
+const genBtn = document.getElementById('generate');
+const resetBtn = document.getElementById('resetBtn');
+const logEl = document.getElementById('log');
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+function log(msg, cls){
+  const line = document.createElement('div');
+  if(cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function normHeader(h){
+  return (h || '').replace(/\s+/g,' ').trim().toLowerCase();
+}
+
+function detectType(headers){
+  const norm = headers.map(normHeader);
+  const has = (s) => norm.includes(s);
+  if (has('country') && has('ad request count') && has('percent')) return 'country';
+  if (has('month') && norm.some(h => h.startsWith('unique') && h.includes('user'))) return 'mau';
+  if (has('day str') && has('country') && has('age') && has('user count')) return 'ca';
+  return null;
+}
+
+function findKey(row, target){
+  // find the actual object key matching a normalized target header
+  return Object.keys(row).find(k => normHeader(k) === target);
+}
+
+function handleFiles(fileList){
+  [...fileList].forEach(file => {
+    if (!file.name.toLowerCase().endsWith('.csv')){
+      log(`Skipped (not a .csv): ${file.name}`, 'warn');
+      return;
+    }
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      encoding: 'UTF-8',
+      complete: (res) => {
+        const headers = res.meta.fields || [];
+        const type = detectType(headers);
+        if (!type){
+          log(`Couldn't recognize the format of "${file.name}" (columns: ${headers.join(', ')}). Check the expected format in the footer.`, 'err');
+          return;
+        }
+        state[type] = { fileName: file.name, rows: res.data, headers };
+        log(`"${file.name}" identified as: ${type === 'country' ? 'Country' : type === 'mau' ? 'MAU' : 'Country × Age'} (${res.data.length} rows)`, 'good');
+        refreshSlots();
+      },
+      error: (err) => log(`Error reading "${file.name}": ${err.message}`, 'err')
+    });
+  });
+}
+
+function refreshSlots(){
+  const map = [['country','slot-country'], ['mau','slot-mau'], ['ca','slot-ca']];
+  map.forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    const detail = el.querySelector('.detail');
+    if (state[key]){
+      el.classList.add('ok');
+      detail.textContent = `${state[key].fileName} — ${state[key].rows.length} rows`;
+    } else {
+      el.classList.remove('ok');
+      detail.textContent = 'waiting for file…';
+    }
+  });
+  const ready = state.country && state.mau && state.ca;
+  genBtn.disabled = !ready;
+  genBtn.classList.toggle('ready', !!ready);
+  resetBtn.style.display = (state.country || state.mau || state.ca) ? 'inline' : 'none';
+}
+
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+['dragenter','dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+resetBtn.addEventListener('click', () => {
+  state.country = null; state.mau = null; state.ca = null;
+  logEl.innerHTML = '';
+  fileInput.value = '';
+  refreshSlots();
+});
+
+function ageLabel(raw){
+  const t = raw.trim();
+  if (!t) return '(unknown)';
+  const m = t.match(/^(\d+)\s+(\d+)$/);
+  if (m) return `${m[1]}-${m[2]}`;
+  if (/^\d+$/.test(t)) return `${t}+`;
+  return t;
+}
+
+function setColWidths(ws, widths){
+  ws['!cols'] = widths.map(w => ({ wch: w }));
+}
+
+function buildWorkbook(){
+  const countryKey = {
+    country: findKey(state.country.rows[0], 'country'),
+    count: findKey(state.country.rows[0], 'ad request count')
+  };
+  const mauRow0 = state.mau.rows[0];
+  const mauKey = {
+    month: findKey(mauRow0, 'month'),
+    users: Object.keys(mauRow0).find(k => normHeader(k).startsWith('unique') && normHeader(k).includes('user'))
+  };
+  const caKey = {
+    country: findKey(state.ca.rows[0], 'country'),
+    age: findKey(state.ca.rows[0], 'age'),
+    count: findKey(state.ca.rows[0], 'user count')
+  };
+
+  // ---- Country totals (one row per country already in the source file) ----
+  const countryRows = state.country.rows
+    .map(r => ({ country: (r[countryKey.country] || '').trim() || '(Unknown)', count: Number(r[countryKey.count]) || 0 }))
+    .filter(r => r.count > 0);
+  countryRows.sort((a, b) => b.count - a.count);
+  const countryTotal = countryRows.reduce((sum, r) => sum + r.count, 0);
+
+  // ---- MAU ----
+  const mauMonth = (mauRow0[mauKey.month] || '').trim();
+  const mauUsers = Number(mauRow0[mauKey.users]) || 0;
+
+  // ---- Age aggregation across the Country x Age file ----
+  const caRows = state.ca.rows.map(r => ({
+    age: (r[caKey.age] || '').trim(),
+    count: Number(r[caKey.count]) || 0
+  }));
+  const ageTotals = {};
+  let unknownAgeUsers = 0;
+  caRows.forEach(r => {
+    if (!r.age){ unknownAgeUsers += r.count; return; }
+    ageTotals[r.age] = (ageTotals[r.age] || 0) + r.count;
+  });
+  const ageKnownTotal = Object.values(ageTotals).reduce((a, b) => a + b, 0);
+  const ageBucketsSorted = Object.keys(ageTotals).sort((a, b) => {
+    const na = parseInt(a, 10), nb = parseInt(b, 10);
+    if (isNaN(na) || isNaN(nb)) return a.localeCompare(b);
+    return na - nb;
+  });
+
+  const wb = XLSX.utils.book_new();
+
+  // ================= Summary =================
+  const summaryAoa = [
+    ['Ad Inventory - Audience Metrics'],
+    [`Reference month: ${mauMonth || '(not identified)'}`],
+    [],
+    ['MAU (Monthly Active Users)', mauUsers],
+    [],
+    ['Total Ad Requests (all countries)', countryTotal],
+  ];
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryAoa);
+  wsSummary['B4'].z = '#,##0';
+  wsSummary['B6'].z = '#,##0';
+  setColWidths(wsSummary, [32, 16]);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+  // ================= Country % =================
+  const countryHeader = ['Country', 'Ad Request Count', '% of Total'];
+  const countryDataRows = countryRows.map(r => [r.country, r.count, countryTotal ? r.count / countryTotal : 0]);
+  const countryTotalRow = ['Total', countryTotal, countryTotal ? 1 : 0];
+  const countryAoa = [countryHeader, ...countryDataRows, countryTotalRow];
+  const wsCountry = XLSX.utils.aoa_to_sheet(countryAoa);
+  const countryLastRow = countryAoa.length;
+  for (let i = 2; i <= countryLastRow; i++){
+    wsCountry[`B${i}`].z = '#,##0';
+    wsCountry[`C${i}`].z = '0.00%';
+  }
+  setColWidths(wsCountry, [14, 18, 12]);
+  wsCountry['!autofilter'] = { ref: `A1:C${countryLastRow - 1}` };
+  XLSX.utils.book_append_sheet(wb, wsCountry, 'Country %');
+
+  // ================= Age % =================
+  const ageHeader = ['Age Bracket', 'Users', '% (base: known age)'];
+  const ageDataRows = ageBucketsSorted.map(raw => [ageLabel(raw), ageTotals[raw], ageKnownTotal ? ageTotals[raw] / ageKnownTotal : 0]);
+  const ageTotalRow = ['Total (known age)', ageKnownTotal, ageKnownTotal ? 1 : 0];
+  const ageAoa = [ageHeader, ...ageDataRows, ageTotalRow];
+  if (unknownAgeUsers > 0){
+    ageAoa.push(['Unknown age (excluded from %)', unknownAgeUsers]);
+  }
+  const wsAge = XLSX.utils.aoa_to_sheet(ageAoa);
+  const ageKnownLastRow = ageDataRows.length + 2; // header + data rows + total row
+  for (let i = 2; i <= ageKnownLastRow; i++){
+    wsAge[`B${i}`].z = '#,##0';
+    wsAge[`C${i}`].z = '0.00%';
+  }
+  if (unknownAgeUsers > 0){
+    wsAge[`B${ageKnownLastRow + 1}`].z = '#,##0';
+  }
+  setColWidths(wsAge, [24, 14, 22]);
+  XLSX.utils.book_append_sheet(wb, wsAge, 'Age %');
+
+  wb.SheetNames = ['Summary', 'Country %', 'Age %'];
+
+  const PT_MONTHS = {
+    'janeiro':'january','fevereiro':'february','marco':'march','março':'march','abril':'april',
+    'maio':'may','junho':'june','julho':'july','agosto':'august','setembro':'september',
+    'outubro':'october','novembro':'november','dezembro':'december'
+  };
+  function monthSlugFrom(monthStr){
+    if (!monthStr) return 'no-month';
+    let s = monthStr.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    Object.keys(PT_MONTHS).forEach(pt => {
+      const ptNorm = pt.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      if (s.includes(ptNorm)) s = s.replace(ptNorm, PT_MONTHS[pt]);
+    });
+    s = s.replace(/\bde\b/g, ' ');
+    return s.replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+  }
+  const monthSlug = monthSlugFrom(mauMonth);
+  XLSX.writeFile(wb, `ad_inventory_metrics_${monthSlug}.xlsx`);
+  log(`Excel generated: ad_inventory_metrics_${monthSlug}.xlsx (Summary, Country %, Age % — ${countryDataRows.length} countries, ${ageDataRows.length} age brackets)`, 'good');
+}
+
+genBtn.addEventListener('click', () => {
+  if (genBtn.disabled) return;
+  try{
+    buildWorkbook();
+  }catch(err){
+    console.error(err);
+    log(`Error generating Excel: ${err.message}`, 'err');
+  }
+});
+</script>
+</body>
+</html>
